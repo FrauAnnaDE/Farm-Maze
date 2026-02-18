@@ -47,12 +47,21 @@ h1{
   margin-bottom:20px;
 }
 
+/* === ONLY FIXED FOR TOUCH: make background non-interactive and behind === */
 .background-layer{
   position:absolute;
   inset:0;
   background:url('fon_ferma.jpg') center/cover no-repeat;
   opacity:0.15;
   border-radius:15px;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* === ONLY FIXED FOR TOUCH: bring UI/canvas above background === */
+.top-ui, canvas, .touch-controls, .game-container > div[style]{
+  position:relative;
+  z-index:1;
 }
 
 canvas{
@@ -105,6 +114,7 @@ button:hover{
   display:flex;
   align-items:center;
   justify-content:center;
+  z-index:9999;
 }
 
 .modal-content{
@@ -123,7 +133,7 @@ button:hover{
   display:none;
 }
 
-/* ===== ONLY ADDED: touch buttons UI ===== */
+/* touch buttons UI (unchanged from your last version) */
 .touch-controls{
   margin-top:12px;
   display:flex;
@@ -184,7 +194,6 @@ button:hover{
 
 <canvas id="gameCanvas"></canvas>
 
-<!-- ===== ONLY ADDED: virtual arrow buttons ===== -->
 <div class="touch-controls" aria-label="Touch controls">
   <button class="pad up" id="btnUp">▲</button>
   <div class="mid">
@@ -373,57 +382,89 @@ document.addEventListener("keydown",e=>{
   if(e.key==="ArrowRight"||e.key==="d")move(1,0);
 });
 
-/* ===== ONLY ADDED: swipe controls + virtual buttons ===== */
+/* ===== ONLY CHANGED/ADDED: touch controls (buttons + drag) ===== */
 function canMoveNow(){
   return document.getElementById("quizModal").classList.contains("hidden") &&
          document.getElementById("winModal").classList.contains("hidden");
 }
 
-// Swipe controls (on canvas)
-let touchStartX = 0;
-let touchStartY = 0;
+// Make canvas fully touch-friendly (no scroll/zoom gestures inside)
 canvas.style.touchAction = "none";
 
+// Drag-to-move (ведём пальцем)
+let dragLastX = 0;
+let dragLastY = 0;
+let movedDuringTouch = false;
+
+function handleTouchStep(dx, dy){
+  // Decide dominant axis (avoid diagonal jitter)
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+  const threshold = 14; // smaller => more responsive drag
+
+  if(absX < threshold && absY < threshold) return false;
+
+  if(absX > absY){
+    move(dx > 0 ? 1 : -1, 0);
+  }else{
+    move(0, dy > 0 ? 1 : -1);
+  }
+  return true;
+}
+
 canvas.addEventListener("touchstart", (e) => {
-  if (!e.touches || e.touches.length === 0) return;
   if(!canMoveNow()) return;
+  if(!e.touches || e.touches.length === 0) return;
   const t = e.touches[0];
   e.preventDefault();
-  touchStartX = t.clientX;
-  touchStartY = t.clientY;
-}, { passive: false });
+  dragLastX = t.clientX;
+  dragLastY = t.clientY;
+  movedDuringTouch = false;
+}, { passive:false });
+
+canvas.addEventListener("touchmove", (e) => {
+  if(!canMoveNow()) return;
+  if(!e.touches || e.touches.length === 0) return;
+  const t = e.touches[0];
+  e.preventDefault();
+
+  const dx = t.clientX - dragLastX;
+  const dy = t.clientY - dragLastY;
+
+  const did = handleTouchStep(dx, dy);
+  if(did){
+    movedDuringTouch = true;
+    // reset origin to allow continuous "leading"
+    dragLastX = t.clientX;
+    dragLastY = t.clientY;
+  }
+}, { passive:false });
 
 canvas.addEventListener("touchend", (e) => {
   if(!canMoveNow()) return;
   e.preventDefault();
 
+  // If user was dragging, we don't need extra "swipe" step
+  if(movedDuringTouch) return;
+
+  // Fallback: quick swipe step (single move)
   const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
-  if (!t) return;
+  if(!t) return;
 
-  const dx = t.clientX - touchStartX;
-  const dy = t.clientY - touchStartY;
+  const dx = t.clientX - dragLastX;
+  const dy = t.clientY - dragLastY;
+  handleTouchStep(dx, dy);
+}, { passive:false });
 
-  const absX = Math.abs(dx);
-  const absY = Math.abs(dy);
-  const threshold = 25;
-  if (absX < threshold && absY < threshold) return;
-
-  if (absX > absY) {
-    if (dx > 0) move(1, 0);
-    else move(-1, 0);
-  } else {
-    if (dy > 0) move(0, 1);
-    else move(0, -1);
-  }
-}, { passive: false });
-
-// Virtual arrow buttons
+// Virtual arrow buttons (tap + hold)
 function bindButton(id, dx, dy){
   const btn = document.getElementById(id);
   if(!btn) return;
 
+  // Tap
   btn.addEventListener("click", () => { if(canMoveNow()) move(dx, dy); });
 
+  // Hold (touch)
   let holdTimer = null;
   btn.addEventListener("touchstart", (e) => {
     if(!canMoveNow()) return;
@@ -436,15 +477,15 @@ function bindButton(id, dx, dy){
     if(holdTimer) clearInterval(holdTimer);
     holdTimer = null;
   }
-  btn.addEventListener("touchend", stopHold);
-  btn.addEventListener("touchcancel", stopHold);
+  btn.addEventListener("touchend", stopHold, { passive:true });
+  btn.addEventListener("touchcancel", stopHold, { passive:true });
 }
 
 bindButton("btnUp", 0, -1);
 bindButton("btnDown", 0, 1);
 bindButton("btnLeft", -1, 0);
 bindButton("btnRight", 1, 0);
-/* ===== end of added controls ===== */
+/* ===== end touch controls ===== */
 
 function checkKey(){
   keys=keys.filter(k=>{
