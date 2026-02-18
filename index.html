@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flucht durch das Labyrinth</title>
+
+<style>
+:root{
+  --bg:#0f172a;
+  --panel:#1e293b;
+  --cyan:#06b6d4;
+  --emerald:#10b981;
+  --yellow:#fbbf24;
+  --red:#ef4444;
+}
+
+body{
+  margin:0;
+  background:var(--bg);
+  font-family:Arial, sans-serif;
+  color:white;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+header{
+  text-align:center;
+  padding:10px;
+}
+
+header img{
+  height:60px;
+}
+
+h1{
+  margin:5px 0;
+}
+
+.game-container{
+  position:relative;
+  background:var(--panel);
+  padding:15px;
+  border-radius:15px;
+  box-shadow:0 0 25px #000;
+  margin-bottom:20px;
+}
+
+.background-layer{
+  position:absolute;
+  inset:0;
+  background:url('fon_ferma.jpg') center/cover no-repeat;
+  opacity:0.15;
+  border-radius:15px;
+}
+
+canvas{
+  display:block;
+  background:transparent;
+}
+
+.top-ui{
+  display:flex;
+  justify-content:space-between;
+  margin-bottom:10px;
+  flex-wrap:wrap;
+}
+
+.keys{
+  display:flex;
+  gap:5px;
+  align-items:center;
+}
+
+.key-icon{
+  width:14px;
+  height:14px;
+  background:var(--yellow);
+  border-radius:50%;
+  opacity:0.3;
+}
+
+.key-icon.collected{
+  opacity:1;
+}
+
+button{
+  background:var(--panel);
+  border:1px solid var(--cyan);
+  color:white;
+  padding:6px 12px;
+  border-radius:8px;
+  cursor:pointer;
+}
+
+button:hover{
+  background:var(--cyan);
+}
+
+.modal{
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.6);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+
+.modal-content{
+  background:var(--panel);
+  padding:20px;
+  border-radius:12px;
+  text-align:center;
+  max-width:300px;
+}
+
+.modal button{
+  margin:5px;
+}
+
+.hidden{
+  display:none;
+}
+
+/* ===== ONLY ADDED: touch buttons UI ===== */
+.touch-controls{
+  margin-top:12px;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:8px;
+  user-select:none;
+}
+
+.touch-controls .mid{
+  display:flex;
+  gap:10px;
+  align-items:center;
+  justify-content:center;
+}
+
+.pad{
+  width:56px;
+  height:56px;
+  border-radius:14px;
+  border:1px solid rgba(6,182,212,0.9);
+  background:rgba(30,41,59,0.9);
+  color:white;
+  font-size:22px;
+  line-height:1;
+  box-shadow:0 6px 18px rgba(0,0,0,0.35);
+  touch-action:manipulation;
+}
+
+.pad:active{
+  transform:translateY(1px);
+  background:rgba(6,182,212,0.35);
+}
+</style>
+</head>
+
+<body>
+
+<header>
+  <img src="logo.png">
+  <h1>Flucht durch das Labyrinth</h1>
+  <div>Frau Anna – Deutsch für Kinder</div>
+</header>
+
+<div class="game-container">
+<div class="background-layer"></div>
+
+<div class="top-ui">
+  <div>
+    ⏱ <span id="timer">00:00.0</span> |
+    👣 <span id="steps">0</span>
+  </div>
+  <div class="keys">
+    🔑 Schlüssel:
+    <div id="keyIcons"></div>
+  </div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<!-- ===== ONLY ADDED: virtual arrow buttons ===== -->
+<div class="touch-controls" aria-label="Touch controls">
+  <button class="pad up" id="btnUp">▲</button>
+  <div class="mid">
+    <button class="pad left" id="btnLeft">◀</button>
+    <button class="pad down" id="btnDown">▼</button>
+    <button class="pad right" id="btnRight">▶</button>
+  </div>
+</div>
+
+<div style="margin-top:10px;">
+  <button onclick="newGame()">Neues Labyrinth</button>
+  <button onclick="newGame()">Wiederholen</button>
+</div>
+
+</div>
+
+<!-- Quiz Modal -->
+<div id="quizModal" class="modal hidden">
+  <div class="modal-content">
+    <h3 id="question"></h3>
+    <div id="answers"></div>
+  </div>
+</div>
+
+<!-- Win Modal -->
+<div id="winModal" class="modal hidden">
+  <div class="modal-content">
+    <h2>Gewonnen!</h2>
+    <p id="finalStats"></p>
+    <p>Perfekte Route!</p>
+    <button onclick="newGame()">Neustart</button>
+  </div>
+</div>
+
+<script>
+const size=35;
+let cellSize;
+let maze=[];
+let player={x:0,y:0};
+let keys=[];
+let collected=0;
+let exit=null;
+let enemies=[];
+let steps=0;
+let timerInterval;
+let startTime;
+const canvas=document.getElementById("gameCanvas");
+const ctx=canvas.getContext("2d");
+
+const questionsRaw=`Was mag die Kuh?,Gras,Fleisch,Fisch,1
+Was mag das Pferd?,Gras,Schokolade,Pizza,1
+Was mag die Ziege?,Gras,Eis,Wurst,1
+Was mag das Schaf?,Hamburger,Gras,Pizza,2
+Was mag der Esel?,Kuchen,Fisch,Mohrrübe,3
+Was mag das Schwein?,Schokolade,Apfel,Eis,2
+Was mag das Kaninchen?,Fleisch,Mohrrübe,Fisch,2
+Was mag die Katze?,Gras,Brot,Fisch,3
+Was mag die Maus?,Fleisch,Käse,Suppe,2
+Was mag der Affe?,Fisch,Bananen,Fleisch,2
+Was mag der Löwe?,Gras,Fleisch,Karotten,2
+Was mag der Tiger?,Brot,Äpfel,Fleisch,3
+Was mag der Gepard?,Salat,Fleisch,Kuchen,2
+Was mag der Elefant?,Fisch,Gras,Wurst,2
+Was mag das Zebra?,Fleisch,Eis,Gras,3
+Was mag das Krokodil?,Mohrrübe,Fleisch,Gras,2
+Was mag die Schildkröte?,Fisch,Fleisch,Salat,3
+Was mag der Bär?,Pizza,Honig,Salat,2
+Was mag der Wolf?,Gras,Kuchen,Fleisch,3
+Was mag die Robbe?,Brot,Fisch,Karotten,2
+Was mag der Pinguin?,Äpfel,Fisch,Gras,2
+Was mag der Flamingo?,Pizza,Brot,Fisch,3
+Was mag der Papagei?,Fleisch,Obst,Fisch,2
+Was mag das Kamel?,Eis,Gras,Fisch,2
+Was mag das Rentier?,Fleisch,Suppe,Gras,3`;
+
+const questions=questionsRaw.split("\n").map(q=>{
+  const p=q.split(",");
+  return {q:p[0],a:[p[1],p[2],p[3]],c:parseInt(p[4])-1};
+});
+
+function resize(){
+  const min=Math.min(window.innerWidth*0.8,600);
+  canvas.width=min;
+  canvas.height=min;
+  cellSize=min/size;
+}
+window.addEventListener("resize",resize);
+
+function generateMaze(){
+  maze=Array(size).fill().map(()=>Array(size).fill(1));
+  function dfs(x,y){
+    maze[y][x]=0;
+    const dirs=[[2,0],[-2,0],[0,2],[0,-2]].sort(()=>Math.random()-0.5);
+    for(let [dx,dy] of dirs){
+      let nx=x+dx,ny=y+dy;
+      if(nx>0&&ny>0&&nx<size-1&&ny<size-1&&maze[ny][nx]===1){
+        maze[y+dy/2][x+dx/2]=0;
+        dfs(nx,ny);
+      }
+    }
+  }
+  dfs(1,1);
+}
+
+function randomFree(){
+  while(true){
+    let x=Math.floor(Math.random()*size);
+    let y=Math.floor(Math.random()*size);
+    if(maze[y][x]===0) return {x,y};
+  }
+}
+
+function placeKeys(){
+  keys=[];
+  for(let i=0;i<10;i++){
+    keys.push(randomFree());
+  }
+}
+
+function placeEnemies(){
+  enemies=[];
+  for(let i=0;i<5;i++){
+    enemies.push(randomFree());
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  for(let y=0;y<size;y++){
+    for(let x=0;x<size;x++){
+      if(maze[y][x]===1){
+        ctx.fillStyle="#000";
+        ctx.fillRect(x*cellSize,y*cellSize,cellSize,cellSize);
+      }
+    }
+  }
+
+  keys.forEach(k=>{
+    ctx.fillStyle="#fbbf24";
+    ctx.beginPath();
+    ctx.arc((k.x+0.5)*cellSize,(k.y+0.5)*cellSize,cellSize/4,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  if(exit){
+    ctx.fillStyle="#10b981";
+    ctx.beginPath();
+    ctx.arc((exit.x+0.5)*cellSize,(exit.y+0.5)*cellSize,cellSize/3,0,Math.PI*2);
+    ctx.fill();
+  }
+
+  enemies.forEach(e=>{
+    ctx.fillStyle="#ef4444";
+    ctx.beginPath();
+    ctx.arc((e.x+0.5)*cellSize,(e.y+0.5)*cellSize,cellSize/3,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  ctx.shadowColor="#06b6d4";
+  ctx.shadowBlur=15;
+  ctx.fillStyle="#06b6d4";
+  ctx.beginPath();
+  ctx.arc((player.x+0.5)*cellSize,(player.y+0.5)*cellSize,cellSize/3,0,Math.PI*2);
+  ctx.fill();
+  ctx.shadowBlur=0;
+}
+
+function move(dx,dy){
+  let nx=player.x+dx,ny=player.y+dy;
+  if(maze[ny]&&maze[ny][nx]===0){
+    player.x=nx;
+    player.y=ny;
+    steps++;
+    document.getElementById("steps").textContent=steps;
+    checkKey();
+    checkEnemy();
+    draw();
+  }
+}
+
+document.addEventListener("keydown",e=>{
+  if(e.key==="ArrowUp"||e.key==="w")move(0,-1);
+  if(e.key==="ArrowDown"||e.key==="s")move(0,1);
+  if(e.key==="ArrowLeft"||e.key==="a")move(-1,0);
+  if(e.key==="ArrowRight"||e.key==="d")move(1,0);
+});
+
+/* ===== ONLY ADDED: swipe controls + virtual buttons ===== */
+function canMoveNow(){
+  return document.getElementById("quizModal").classList.contains("hidden") &&
+         document.getElementById("winModal").classList.contains("hidden");
+}
+
+// Swipe controls (on canvas)
+let touchStartX = 0;
+let touchStartY = 0;
+canvas.style.touchAction = "none";
+
+canvas.addEventListener("touchstart", (e) => {
+  if (!e.touches || e.touches.length === 0) return;
+  if(!canMoveNow()) return;
+  const t = e.touches[0];
+  e.preventDefault();
+  touchStartX = t.clientX;
+  touchStartY = t.clientY;
+}, { passive: false });
+
+canvas.addEventListener("touchend", (e) => {
+  if(!canMoveNow()) return;
+  e.preventDefault();
+
+  const t = (e.changedTouches && e.changedTouches[0]) ? e.changedTouches[0] : null;
+  if (!t) return;
+
+  const dx = t.clientX - touchStartX;
+  const dy = t.clientY - touchStartY;
+
+  const absX = Math.abs(dx);
+  const absY = Math.abs(dy);
+  const threshold = 25;
+  if (absX < threshold && absY < threshold) return;
+
+  if (absX > absY) {
+    if (dx > 0) move(1, 0);
+    else move(-1, 0);
+  } else {
+    if (dy > 0) move(0, 1);
+    else move(0, -1);
+  }
+}, { passive: false });
+
+// Virtual arrow buttons
+function bindButton(id, dx, dy){
+  const btn = document.getElementById(id);
+  if(!btn) return;
+
+  btn.addEventListener("click", () => { if(canMoveNow()) move(dx, dy); });
+
+  let holdTimer = null;
+  btn.addEventListener("touchstart", (e) => {
+    if(!canMoveNow()) return;
+    e.preventDefault();
+    move(dx, dy);
+    holdTimer = setInterval(()=>{ if(canMoveNow()) move(dx, dy); }, 140);
+  }, { passive:false });
+
+  function stopHold(){
+    if(holdTimer) clearInterval(holdTimer);
+    holdTimer = null;
+  }
+  btn.addEventListener("touchend", stopHold);
+  btn.addEventListener("touchcancel", stopHold);
+}
+
+bindButton("btnUp", 0, -1);
+bindButton("btnDown", 0, 1);
+bindButton("btnLeft", -1, 0);
+bindButton("btnRight", 1, 0);
+/* ===== end of added controls ===== */
+
+function checkKey(){
+  keys=keys.filter(k=>{
+    if(k.x===player.x&&k.y===player.y){
+      askQuestion();
+      return false;
+    }
+    return true;
+  });
+}
+
+function askQuestion(){
+  const q=questions[Math.floor(Math.random()*questions.length)];
+  document.getElementById("question").textContent=q.q;
+  const answersDiv=document.getElementById("answers");
+  answersDiv.innerHTML="";
+  q.a.forEach((ans,i)=>{
+    const btn=document.createElement("button");
+    btn.textContent=ans;
+    btn.onclick=()=>{
+      document.getElementById("quizModal").classList.add("hidden");
+      if(i===q.c){
+        collected++;
+        document.querySelectorAll(".key-icon")[collected-1].classList.add("collected");
+        if(collected===10){
+          exit=randomFree();
+          placeEnemies();
+        }
+      }else{
+        keys.push(randomFree());
+      }
+      draw();
+    };
+    answersDiv.appendChild(btn);
+  });
+  document.getElementById("quizModal").classList.remove("hidden");
+}
+
+function checkEnemy(){
+  enemies.forEach(e=>{
+    if(e.x===player.x&&e.y===player.y){
+      exit=randomFree();
+    }
+  });
+}
+
+function updateEnemies(){
+  enemies.forEach(e=>{
+    if(Math.random()<0.3){
+      const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+      const [dx,dy]=dirs[Math.floor(Math.random()*4)];
+      let nx=e.x+dx,ny=e.y+dy;
+      if(maze[ny]&&maze[ny][nx]===0){
+        e.x=nx;e.y=ny;
+      }
+    }
+  });
+}
+
+function gameLoop(){
+  updateEnemies();
+  if(exit&&player.x===exit.x&&player.y===exit.y){
+    win();
+  }
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+function win(){
+  clearInterval(timerInterval);
+  document.getElementById("finalStats").textContent=
+    "Zeit: "+document.getElementById("timer").textContent+
+    " | Schritte: "+steps;
+  document.getElementById("winModal").classList.remove("hidden");
+}
+
+function startTimer(){
+  startTime=Date.now();
+  timerInterval=setInterval(()=>{
+    let t=(Date.now()-startTime)/1000;
+    let m=Math.floor(t/60);
+    let s=(t%60).toFixed(1).padStart(4,"0");
+    document.getElementById("timer").textContent=
+      String(m).padStart(2,"0")+":"+s;
+  },100);
+}
+
+function newGame(){
+  document.getElementById("winModal").classList.add("hidden");
+  collected=0;
+  steps=0;
+  document.getElementById("steps").textContent=0;
+  document.getElementById("keyIcons").innerHTML="";
+  for(let i=0;i<10;i++){
+    const d=document.createElement("div");
+    d.className="key-icon";
+    document.getElementById("keyIcons").appendChild(d);
+  }
+  generateMaze();
+  player=randomFree();
+  placeKeys();
+  exit=null;
+  enemies=[];
+  resize();
+  startTimer();
+  draw();
+}
+
+resize();
+newGame();
+gameLoop();
+</script>
+
+</body>
+</html>
